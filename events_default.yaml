@@ -1,0 +1,14 @@
+timestamps:
+  syslog_rfc3164: "%b %-d %H:%M:%S"
+  syslog_rfc3339: "%Y-%m-%dT%H:%M:%S%f%z"
+  a_ts: "blabla"
+
+variables:
+  users:
+    - alice
+    - bob
+    - claire
+  servers:
+    - master1
+    - master2
+    - master3
