@@ -1,7 +1,6 @@
 timestamps:
   syslog_rfc3164: "%b %-d %H:%M:%S"
   syslog_rfc3339: "%Y-%m-%dT%H:%M:%S%f%z"
-  a_ts: "blabla"
 
 variables:
   users:
@@ -12,3 +11,7 @@ variables:
     - master1
     - master2
     - master3
+
+events:
+  ssh_login1: "<86>${syslog_rfc3164} ${servers} sshd[652829]: Accepted publickey for ${users} from 10.11.12.13 port 40080 ssh2: RSA SHA256:QKuZ4KsmwSFZEikZPInvfTgFSfiQVgBJRNKO1gpz5LM"
+  ssh_login2: "<86>${syslog_rfc3164} ${servers} sshd[652829]: pam_unix(sshd:session): session opened for user ${users}(uid=80004) by (uid=0)"

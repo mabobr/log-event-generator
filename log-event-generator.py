@@ -8,15 +8,16 @@
 # -s scenarios_definition.yaml - where sequences fo events are defined
 # -r scenario_to_run           - scenario to execute
 
-import sys, getopt, traceback, os, datetime, yaml
+import sys, getopt, traceback, os, datetime, yaml, random, re
 
 
 verbose = False
+re_to_nextvar = re.compile('^(.*?)\$\{(.*?)\}(.*)')
 
 # https://www.geeksforgeeks.org/getter-and-setter-in-python/
 class TimeStamp:
     def __init__(self, a_ts_string):
-        self.ts_string = a_ts_string
+        self._ts_string = a_ts_string
 
     def show(self, ts_ue = None):
 
@@ -37,6 +38,52 @@ class TimeStamp:
             raise ValueError("strftime() error on input format string:"+a_ts_string)
         self._ts_string = a_ts_string
 
+#############################################################
+class variableList:
+    def __init__(self, varList):
+        self._varList = varList
+
+    def show(self, ts_ue = None):
+        return random.choice(self._varList)
+
+#############################################################
+class aString:
+    def __init__(self, a_string):
+        self._a_string = a_string
+
+    def show(self, ts_ue = None):
+        return self.string
+
+    @property
+    def string(self):
+        return self._a_string
+
+#############################################################
+class anEvent:
+    def __init__(self, a_string, events_defs):
+        self._a_string = a_string
+        self._token_list = []
+
+        string_rest = a_string
+        while True:
+            re = re_to_nextvar.search(string_rest)
+            if re:
+                obj = aString(re.group(1))
+                self._token_list.append(obj)
+
+                a_var = re.group(2)
+                # a_var must be found in timestamps or variables
+                # then object must be appended
+                string_rest = re.group(3)
+            else:
+                obj = aString(string_rest)
+                self._token_list.append(obj)
+                break
+
+    # here a show() function must be added
+
+
+                
 
 
 ############################################################
@@ -61,12 +108,13 @@ def parse_event_definitions(evts_def_file):
     events_defs = {}
     events_defs['timestamps'] = {}
     events_defs['variables'] = {}
+    events_defs['events'] = {}
 
     debug('Preparing to parse event definition file: '+evts_def_file)
     try:
         with open(evts_def_file, "r") as stream:
             try:
-                events_defs = yaml.safe_load(stream)
+                events_config = yaml.safe_load(stream)
             except yaml.YAMLError as exc:
                 sys.stderr.write(str(exc)+"\n")
                 return None
@@ -77,35 +125,52 @@ def parse_event_definitions(evts_def_file):
 
     # check for timestamps
     try:
-        if not( isinstance(events_defs['timestamps'],dict)):
-            sys.stderr.write('timestamps in YAML file:'+evts_def_file+' must be structure/object, not:'+str(type(events_defs['timestamps']))+"\n")
+        if not( isinstance(events_config['timestamps'],dict)):
+            sys.stderr.write('timestamps in YAML file:'+evts_def_file+' must be structure/object, not:'+str(type(events_config['timestamps']))+"\n")
             return None
     except KeyError:
         debug('No timestamps present in YAML file:'+evts_def_file)
     else:
-        for a_ts in events_defs['timestamps']:
-            if not( isinstance(events_defs['timestamps'][a_ts],str)):
-                sys.stderr.write('In timestamps, in YAML file:'+evts_def_file+' TS='+a_ts+" must be string, not:"+str(type(events_defs['timestamps'][a_ts]))+"\n")
+        for a_ts in events_config['timestamps']:
+            # no dupplicate check - safe_load() fixed YAML problems
+            if not( isinstance(events_config['timestamps'][a_ts],str)):
+                sys.stderr.write('In timestamps, in YAML file:'+evts_def_file+' TS='+a_ts+" must be string, not:"+str(type(events_config['timestamps'][a_ts]))+"\n")
                 return None
 
-            o_ts = TimeStamp(events_defs['timestamps'][a_ts])
-            debug('OK timestamp: '+a_ts+' Def='+events_defs['timestamps'][a_ts]+' Example='+o_ts.show())
+            o_ts = TimeStamp(events_config['timestamps'][a_ts])
+            debug('OK timestamp: '+a_ts+' Def='+events_config['timestamps'][a_ts]+' Example='+o_ts.show())
             events_defs['timestamps'][a_ts] = o_ts
               
     # check for variables
     try:
-        if not( isinstance(events_defs['variables'],dict)):
-            sys.stderr.write('variables in YAML file:'+evts_def_file+' must be structure/object, not:'+str(type(events_defs['timestamps']))+"\n")
+        if not( isinstance(events_config['variables'],dict)):
+            sys.stderr.write('variables in YAML file:'+evts_def_file+' must be structure/object, not:'+str(type(events_config['timestamps']))+"\n")
             return None
     except KeyError:
         debug('No variables present in YAML file:'+evts_def_file)
     else:
-        for a_var_group in events_defs['variables']:
-            if not( isinstance(events_defs['variables'][a_var_groups],list)):
-                sys.stderr.write('variable group '+a_var_group+' in YAML file:'+evts_def_file+' must be list, not:'+str(type(events_defs['timestamps']))+"\n")
+        for a_var_group in events_config['variables']:
+            # no dupplicate check - safe_load() fixed YAML problems
+            if not( isinstance(events_config['variables'][a_var_group],list)):
+                sys.stderr.write('variable group '+a_var_group+' in YAML file:'+evts_def_file+' must be list, not:'+str(type(events_config['timestamps']))+"\n")
                 return None
 
-            # vyrobit clsaa pre variables a init pre tento zoznam
+            o_vl = variableList(events_config['variables'][a_var_group])
+            events_defs['variables'][a_var_group] = o_vl
+            debug('OK variable list: '+a_var_group+' Example='+o_vl.show())
+
+    try:
+        if not( isinstance(events_config['events'],dict)):
+            sys.stderr.write('events in YAML file:'+evts_def_file+' must be structure/object, not:'+str(type(events_config['timestamps']))+"\n")
+            return None
+    except KeyError:
+        sys.stderr.write("At least one event in events section must be present in file:"+evts_def_file)   
+        return None
+    else:
+        for an_event in events_config['events']:
+            o_evt = anEvent(events_config['events'][an_event], events_defs)
+            events_defs['events'][an_event] = o_evt
+            debug('OK event: '+an_event+' Example='+o_evt.show())
 
     debug('Syntax and semantics of file '+evts_def_file+' is OK, continue')
     return events_defs
