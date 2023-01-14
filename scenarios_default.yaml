@@ -1,7 +1,7 @@
 # this is a scenario name/id
 sshd_2_events:
   # this is defined event id
-  - ssh_login1:
+  - ssh_login1
   # this many seconds (s), or miliseconds (ms) will execution wait
   - wait: 1s
   # next event in scenario

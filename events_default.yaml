@@ -1,6 +1,7 @@
 timestamps:
-  syslog_rfc3164: "%b %-d %H:%M:%S"
-  syslog_rfc3339: "%Y-%m-%dT%H:%M:%S%f%z"
+  syslog_rfc3164:   "%b %-d %H:%M:%S"
+  syslog_rfc3339:   "%Y-%m-%dT%H:%M:%S%f%z"
+  mariadbts_w_text: "Date: %Y-%m-%d Time:%H:%M:%S"
 
 variables:
   users:
@@ -15,3 +16,5 @@ variables:
 events:
   ssh_login1: "<86>${syslog_rfc3164} ${servers} sshd[652829]: Accepted publickey for ${users} from 10.11.12.13 port 40080 ssh2: RSA SHA256:QKuZ4KsmwSFZEikZPInvfTgFSfiQVgBJRNKO1gpz5LM"
   ssh_login2: "<86>${syslog_rfc3164} ${servers} sshd[652829]: pam_unix(sshd:session): session opened for user ${users}(uid=80004) by (uid=0)"
+  # in valid YAML an dollar sign must be escaped - so this will produce literally ... \${servers} ...
+  escape_example: "<86>${syslog_rfc3164} \\${servers} sshd[652829]: pam_unix(sshd:session): $JANO session opened for user ${users}(uid=80004) by (uid=0)"
