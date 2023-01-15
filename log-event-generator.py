@@ -1,7 +1,7 @@
 #!/usr/bin/env python3                                                                                                                                                                                            
 # -*- coding: utf-8 -*-
 
-# usage: log-event-generator.py [-v]
+# usage: log-event-generator.py [-v] -e /path/2/events/defs.yaml -s /path/2/scenarios/defs.yamp -r scenrio2run
 # -v ... verbose
 # -t time_factor ... TBD
 # -e events_definitions.yaml   - where format of events is defined
@@ -14,6 +14,8 @@ import sys, getopt, traceback, os, datetime, yaml, random, re
 verbose = False
 re_to_nextvar       = re.compile('^(.*?)\$\{(.+?)\}(.*)')
 re_idenitifier_ok   = re.compile('^[\w\d\_]+$')
+re_seconds          = re.compile('^\s*(\d+)\s*s?\s*$')
+re_miliseconds      = re.compile('^\s*(\d+)\s*ms\s*$')
 
 # https://www.geeksforgeeks.org/getter-and-setter-in-python/
 class TimeStamp:
@@ -105,7 +107,27 @@ class anEvent:
 
     # here a show() function must be added
 
+#############################################################
+class scenarioStep:
+    def __init__(self, stepName, stepType, stepPtr = None, value = None):
+        
+        self._name          = stepName
+        self._type          = stepType
+        self._ptr           = stepPtr
+        self._static_vars   = []
+        self._wait_in_ms    = 1000
+        self._loop_init     = value
 
+        if self._type == 1:
+            debug('Scenario step (event) added:'+self._name)
+        elif self._type == 2:
+            if not(value is None):
+                self._wait_in_ms = value
+            debug('Scenario step (wait) added: '+str(self._wait_in_ms)+' miliseconds')
+
+    def add_static_var( self, varName):
+        self._static_vars.append(varName)
+        debug('Scenario: added staic variable:'+varName+' to event:'+self._name)
                 
 
 ############################################################
@@ -230,7 +252,7 @@ def parse_event_definitions(evts_def_file):
     return events_defs
 
 ############################################################
-def parse_scenarios( scenario_yaml_file, events_defs):
+def parse_scenarios( scenario_yaml_file, scenario2run, events_defs):
 
     if scenario_yaml_file is None:
         return None
@@ -248,32 +270,85 @@ def parse_scenarios( scenario_yaml_file, events_defs):
     except FileNotFoundError as exc:
         return None
         
-    debug('YAML syntax of '+scenario_yaml_file+' is OK, semantics check follow')
+    debug('YAML syntax of '+scenario_yaml_file+' is OK, semantics check follow, scenario 2 run='+scenario2run)
 
-    for a_scenario in scenarios_config.keys():
-        debug("Check for scenario:"+a_scenario)
+    if not is_id_valid(scenario2run):
+        sys.stderr.write('The scenario '+scenario2run+' in YAML file:'+scenario_yaml_file+" not allowed characters in identifier\n")
+        return None
 
-        if not is_id_valid(a_scenario):
-            sys.stderr.write('The scenario '+a_scenario+' in YAML file:'+scenario_yaml_file+" not allowed characters in identifier\n")
-            return None
+    if not(scenario2run in scenarios_config.keys()):
+        sys.stderr.write('The scenario to run '+scenario2run+' not found in YAML file:'+scenario_yaml_file+" , check -r parameter\n")
+        return None
 
-        if not( isinstance(scenarios_config[a_scenario],list)):
-            sys.stderr.write('A scenario:'+a_scenario+' in file:'+evts_def_file+' must be list, not:'+str(type(scenarios_config[a_scenario]))+"\n")
-            return None
+    scenario_l = parse_scenarios_rec( scenarios_config[scenario2run], events_defs, [] )
+    if scenario_l is None:
+        return None
 
-        o_scenario = parse_scenarios_rec( scenarios_config[a_scenario], events_defs )
-        scenarios_defs[a_scenario] = o_scenario
-        debug('OK scenario:'+a_scenario)
-
-        return scenarios_defs
+    debug('OK scenario:'+scenario2run)
+    return scenario_l
 
 ############################################################
-def parse_scenarios_rec( a_scenario_cfg, events_defs ):
+def parse_scenarios_rec( a_scenario_cfg, events_defs, scenario_l ):
     
-    for scenario_step in a_scenario_cfg:for scenario_step in scenarios_config[a_scenario]:
-            debug('Check for scenario:'+a_scenario+' step='+scenario_step)
+    # a scenario is just list of events waitlables and loops
+    if not(isinstance(a_scenario_cfg,list)):
+        sys.stderr.write('A scenario to run must be list, check scenarios in -s parameter file, type is:'+str(type(a_scenario_cfg))+"\n")
+        return None
 
-        # may be scalar/string (event name) of dict
+    for scenario_step in a_scenario_cfg:
+        if isinstance(scenario_step, str):          
+            debug('The scenario step: simple event: '+scenario_step)
+            if not(scenario_step in events_defs):
+                sys.stderr.write('The event '+scenario_step+' is not defined anywhere, check content of -e YAML file'+"\n")
+                return None
+            scenario_l.append(scenarioStep(scenario_step, 1, events_defs[scenario_step]))
+            
+        elif isinstance(scenario_step, dict):
+            for scenario_dict_entry in scenario_step.keys():
+                if scenario_dict_entry == 'wait':
+                    wait_value = scenario_step[scenario_dict_entry]
+                    re = re_seconds.match(wait_value)
+                    if re:
+                        wait_ms = 1000 * int(re.group(1))
+                    else:
+                        re = re_miliseconds.match(wait_value)
+                        if re:
+                            wait_ms = int(re.group(1))
+                        else:
+                            sys.stderr.write('Problem with wait value:'+wait_value+', check content of -s YAML file'+"\n")
+                            return None
+
+                    scenario_l.append( scenarioStep(None, 2, None, wait_ms) )
+                    
+                elif scenario_dict_entry == 'loop':
+                    # HERE CONTINUE WITH LOOP PARSING
+                    debug('LOOP')
+                else:
+                    # this must be an event
+                    if not(scenario_dict_entry in events_defs):
+                        sys.stderr.write('The event '+scenario_dict_entry+' is not defined anywhere, check content of -e YAML file'+"\n")
+                        return None
+                    if isinstance(scenario_step[scenario_dict_entry], list):
+                        # the event has list of "static" variables
+                        obj = scenarioStep(scenario_dict_entry, 1, events_defs[scenario_dict_entry])
+                        for a_static_var in scenario_step[scenario_dict_entry]:
+                            if a_static_var in events_defs:
+                                obj.add_static_var(a_static_var)
+                            else:
+                                sys.stderr.write('The variable '+a_static_var+' is not defined anywhere, check content of -e YAML file'+"\n")
+                                return None
+                        scenario_l.append(obj)
+                    else:
+                        sys.stderr.write('For the event '+scenario_dict_entry+' only list is expected, it is list of static variables')
+                        return None
+
+                    debug('Scenario: OK added event:'+scenario_dict_entry)
+
+        else:
+            sys.stderr.write('Only strinf or dictionaries/object are alloved as lit member for scenarios, check item '+scenario_step+' in -s file'+"\n")
+
+    return scenario_l
+        
 
 ############################################################
 def main():
@@ -283,9 +358,10 @@ def main():
     events_defs_file = None
     scenario_defs = None
     scenario_defs_file = None
+    scenario2run = None
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:],"vdhe:s:")
+        opts, args = getopt.getopt(sys.argv[1:],"vdhe:s:r:")
     except Exception as err:
         usage(str(err))
         return 1
@@ -301,18 +377,24 @@ def main():
                 events_defs_file = a        
             elif o == '-s':
                 scenario_defs_file = a
+            elif o == '-r':
+                scenario2run = a
             else:
                 usage('Internal, unhandled option:'+o)
                 return 1
+
+    if scenario2run is None:
+        usage('Parameter -r is missing')
+        return 1
 
     events_defs = parse_event_definitions(events_defs_file)
     if events_defs is None:
         usage('Parameter -e is missing, or YAML file is not correct')
         return 1
 
-    scenario_defs = parse_scenarios( scenario_defs_file, events_defs)
+    scenario_defs = parse_scenarios( scenario_defs_file, scenario2run, events_defs)
     if scenario_defs is None:
-        usage('Parameter -s is missing, or YAML file is not correct')
+        usage('Parameter -s is missing, or scenario definition YAML file is not correct')
         return 1
 
     return 0

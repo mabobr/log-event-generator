@@ -4,24 +4,22 @@ sshd_2_events:
   - ssh_login1
   # this many seconds (s), or miliseconds (ms) will execution wait
   - wait: 1s
+  - wait: 100 ms
   # next event in scenario
   - ssh_login2:
     # for this event, lited varbales will have the same values as in previous event
-    reuse_variables:
-      - servers
-      - users
+    - servers
+    - users
   # here we will make loop
   - loop:
     # this many times loop
     - repeat: 3
     - ssh_login1:
-      reuse_variables:
-        - servers
-        - users 
+      - servers
+      - users 
     - ssh_login2:
-      reuse_variables:
-        - servers
-        - users
+      - servers
+      - users
     - wait: 10s
 
 
