@@ -1,12 +1,13 @@
 #!/usr/bin/env python3                                                                                                                                                                                            
 # -*- coding: utf-8 -*-
 
-# usage: log-event-generator.py [-v] -e /path/2/events/defs.yaml -s /path/2/scenarios/defs.yamp -r scenrio2run
+# usage: log-event-generator.py [-v] -e /path/2/events/defs.yaml -s /path/2/scenarios/defs.yamp -r scenrio2run [-t time_factor][-c clock_iso_init]
 # -v ... verbose
 # -t time_factor ... TBD
 # -e events_definitions.yaml   - where format of events is defined
 # -s scenarios_definition.yaml - where sequences fo events are defined
 # -r scenario_to_run           - scenario to execute
+# -c clock init time           - e.g. -c "2023-01-22 13:14:15"
 
 import sys, getopt, traceback, os, datetime, yaml, random, re
 
@@ -16,6 +17,8 @@ re_to_nextvar       = re.compile('^(.*?)\$\{(.+?)\}(.*)')
 re_idenitifier_ok   = re.compile('^[\w\d\_]+$')
 re_seconds          = re.compile('^\s*(\d+)\s*s?\s*$')
 re_miliseconds      = re.compile('^\s*(\d+)\s*ms\s*$')
+re_number           = re.compile('^\d+$')
+re_float            = re.compile('[+-]?\d+(\.\d+)?$')
 
 # https://www.geeksforgeeks.org/getter-and-setter-in-python/
 class TimeStamp:
@@ -107,6 +110,21 @@ class anEvent:
 
     # here a show() function must be added
 
+##############################################################
+class theClock:
+    def __init__(self, init_ue: int = None, timeFactor:float = 1 ):
+
+            if init_ue is None:
+                self._current_time = int(datetime.datetime.now().timestamp())
+            else:
+                self._current_time = init_ue
+            if timeFactor is None:
+                timeFactor = 1
+
+            self._timefactor = timeFactor
+
+            debug('Clock initialized, NOW='+str(self._current_time)+' ('+ datetime.datetime.fromtimestamp(self._current_time).strftime("%Y-%m-%d %H:%M:%S")+') time factor='+str(self._timefactor))
+
 #############################################################
 class scenarioStep:
     def __init__(self, stepName, stepType, stepPtr = None, value = None):
@@ -124,6 +142,11 @@ class scenarioStep:
             if not(value is None):
                 self._wait_in_ms = value
             debug('Scenario step (wait) added: '+str(self._wait_in_ms)+' miliseconds')
+        elif self._type == 3:
+            self._loop_init = value
+            debug('Scenario step (loop) added, loop count= '+str(self._loop_init))
+        else:
+            raise ValueError("Unimplemented scenarioStep:"+str(self._type))
 
     def add_static_var( self, varName):
         self._static_vars.append(varName)
@@ -305,7 +328,20 @@ def parse_scenarios_rec( a_scenario_cfg, events_defs, scenario_l ):
             
         elif isinstance(scenario_step, dict):
             for scenario_dict_entry in scenario_step.keys():
-                if scenario_dict_entry == 'wait':
+                if isinstance(scenario_dict_entry, int) or re_number.match(scenario_dict_entry):
+                    # number found, it is considered as a list
+                    loop_value = int(scenario_dict_entry)
+                    loop_l = scenario_step[scenario_dict_entry]
+                    if isinstance(loop_l, list):
+                        debug('LOOP list, cnt='+str(loop_value))
+
+                        list_o = parse_scenarios_rec(loop_l, events_defs, [])
+                        scenario_l.append( scenarioStep('LOOP:'+str(loop_value), 3, list_o, loop_value) )
+                    else:
+                        sys.stderr.write("Problem with LOOP, LOOPs must be lists, check in -s YAML file\n")
+                        return None
+
+                elif scenario_dict_entry == 'wait':
                     wait_value = scenario_step[scenario_dict_entry]
                     re = re_seconds.match(wait_value)
                     if re:
@@ -318,11 +354,7 @@ def parse_scenarios_rec( a_scenario_cfg, events_defs, scenario_l ):
                             sys.stderr.write('Problem with wait value:'+wait_value+', check content of -s YAML file'+"\n")
                             return None
 
-                    scenario_l.append( scenarioStep(None, 2, None, wait_ms) )
-                    
-                elif scenario_dict_entry == 'loop':
-                    # HERE CONTINUE WITH LOOP PARSING
-                    debug('LOOP')
+                    scenario_l.append( scenarioStep(None, 2, None, wait_ms) )    
                 else:
                     # this must be an event
                     if not(scenario_dict_entry in events_defs):
@@ -354,14 +386,16 @@ def parse_scenarios_rec( a_scenario_cfg, events_defs, scenario_l ):
 def main():
     global verbose
 
-    events_defs = None
-    events_defs_file = None
-    scenario_defs = None
-    scenario_defs_file = None
-    scenario2run = None
+    events_defs         = None
+    events_defs_file    = None
+    scenario_defs       = None
+    scenario_defs_file  = None
+    scenario2run        = None
+    timeFactor          = "1"
+    clock_init_ue       = None
 
     try:
-        opts, args = getopt.getopt(sys.argv[1:],"vdhe:s:r:")
+        opts, args = getopt.getopt(sys.argv[1:],"vdhe:s:r:t:c:")
     except Exception as err:
         usage(str(err))
         return 1
@@ -379,6 +413,10 @@ def main():
                 scenario_defs_file = a
             elif o == '-r':
                 scenario2run = a
+            elif o == '-t':
+                timeFactor = a
+            elif o == '-c':
+                clock_init_ue = a
             else:
                 usage('Internal, unhandled option:'+o)
                 return 1
@@ -396,6 +434,23 @@ def main():
     if scenario_defs is None:
         usage('Parameter -s is missing, or scenario definition YAML file is not correct')
         return 1
+
+    re = re_float.match(timeFactor)
+    if not(clock_init_ue is None):
+        # conversion from YYYY-MM-DD HH:MM:SS to UE
+        try:
+            date_object = datetime.datetime.strptime(clock_init_ue, "%Y-%m-%d %H:%M:%S")
+        except Exception as err:
+            sys.stderr.write(str(err)+"\n")
+            sys.stderr.write(traceback.format_exc())
+            usage('Parameter -c expects QUOTED date-time in form YYYY-MM-DD HH:MM:SS  e.g. -s "2023-01-23 12:14:15"')
+            return 1
+        clock_init_ue = int(date_object.timestamp())
+
+    runtimeClock = theClock(clock_init_ue, timeFactor)
+
+    # running scenario - CONTINUE HERE
+    raise ValueError("Here to continue with coding")
 
     return 0
             

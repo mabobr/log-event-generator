@@ -10,10 +10,9 @@ sshd_2_events:
     # for this event, lited varbales will have the same values as in previous event
     - servers
     - users
-  # here we will make loop
-  - loop:
-    # this many times loop
-    - repeat: 3
+  
+  # numbers are considered as loop-s, it describes how many times, and content must be list
+  - 3:
     - ssh_login1:
       - servers
       - users 
