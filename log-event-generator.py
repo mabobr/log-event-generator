@@ -8,15 +8,16 @@
 # -s scenarios_definition.yaml - where sequences fo events are defined
 # -r scenario_to_run           - scenario to execute
 # -c clock init time           - e.g. -c "2023-01-22 13:14:15"
+# -S target server for UDP     - e.g. -S 10.11.12.13:514
 
-import sys, getopt, traceback, os, datetime, yaml, random, re
+import sys, getopt, traceback, os, datetime, yaml, random, re, time
 
 
 verbose = False
 re_to_nextvar       = re.compile('^(.*?)\$\{(.+?)\}(.*)')
 re_idenitifier_ok   = re.compile('^[\w\d\_]+$')
-re_seconds          = re.compile('^\s*(\d+)\s*s?\s*$')
-re_miliseconds      = re.compile('^\s*(\d+)\s*ms\s*$')
+re_seconds          = re.compile('^\s*(\-?\d+)\s*s?\s*$')
+re_miliseconds      = re.compile('^\s*(\-?\d+)\s*ms\s*$')
 re_number           = re.compile('^\d+$')
 re_float            = re.compile('[+-]?\d+(\.\d+)?$')
 
@@ -44,12 +45,19 @@ class TimeStamp:
             raise ValueError("strftime() error on input format string:"+a_ts_string)
         self._ts_string = a_ts_string
 
+    def run(self, clock):
+        return datetime.datetime.fromtimestamp(clock.get()).strftime(self._ts_string)
+
+
 #############################################################
 class variableList:
     def __init__(self, varList):
         self._varList = varList
 
     def show(self, ts_ue = None):
+        return random.choice(self._varList)
+
+    def run(self, clock):
         return random.choice(self._varList)
 
 #############################################################
@@ -62,6 +70,9 @@ class aString:
 
     @property
     def string(self):
+        return self._a_string
+
+    def run(self, clock):
         return self._a_string
 
 #############################################################
@@ -108,22 +119,43 @@ class anEvent:
                 debug("Event parsing adding string, site 2:"+string_rest)
                 break
 
+    def run(self, clock):
+
+        out_text = ''
+        for a_token in self._token_list:
+            out_text = out_text + a_token.run(clock)
+        
+        return out_text
+
     # here a show() function must be added
 
 ##############################################################
 class theClock:
-    def __init__(self, init_ue: int = None, timeFactor:float = 1 ):
+    def __init__(self, init_ue: float = None, timeFactor:float = 1.0 ):
 
             if init_ue is None:
-                self._current_time = int(datetime.datetime.now().timestamp())
+                self._current_time = time.time()
             else:
                 self._current_time = init_ue
             if timeFactor is None:
-                timeFactor = 1
+                timeFactor = 1.0
 
             self._timefactor = timeFactor
 
             debug('Clock initialized, NOW='+str(self._current_time)+' ('+ datetime.datetime.fromtimestamp(self._current_time).strftime("%Y-%m-%d %H:%M:%S")+') time factor='+str(self._timefactor))
+
+    @property
+    def timefactor(self):
+        return self._timefactor
+
+    def get(self):
+        return self._current_time
+
+    def add(self, value:float):
+        if self._timefactor >= 0:
+            self._current_time += value
+        else:
+            self._current_time -= value
 
 #############################################################
 class scenarioStep:
@@ -135,6 +167,7 @@ class scenarioStep:
         self._static_vars   = []
         self._wait_in_ms    = 1000
         self._loop_init     = value
+        self._loop_cnt      = 0
 
         if self._type == 1:
             debug('Scenario step (event) added:'+self._name)
@@ -151,6 +184,26 @@ class scenarioStep:
     def add_static_var( self, varName):
         self._static_vars.append(varName)
         debug('Scenario: added staic variable:'+varName+' to event:'+self._name)
+
+    def run(self, clock):
+        if self._type == 1:
+            out_text = self._ptr.run(clock)
+            debug('EVENT call out drivere here:'+out_text)
+        elif self._type == 2:
+            debug('Clock wait in ms:'+str(self._wait_in_ms))
+            clock.add(self._wait_in_ms/1000)
+            if clock.timefactor != 0 and self._wait_in_ms > 0:
+                # real timewait
+                real_timewait = abs(clock.timefactor * self._wait_in_ms/1000)
+                debug('Realtime sleep:'+str(real_timewait))
+                time.sleep(real_timewait) 
+        elif self._type == 3:
+            self._loop_cnt = self._loop_init
+            debug('LOOP initialization to:'+str(self._loop_cnt))
+            while self._loop_cnt > 0:
+                self._loop_cnt -= 1
+                for a_step in self._ptr:
+                    a_step.run(clock)
                 
 
 ############################################################
@@ -377,7 +430,7 @@ def parse_scenarios_rec( a_scenario_cfg, events_defs, scenario_l ):
                     debug('Scenario: OK added event:'+scenario_dict_entry)
 
         else:
-            sys.stderr.write('Only strinf or dictionaries/object are alloved as lit member for scenarios, check item '+scenario_step+' in -s file'+"\n")
+            sys.stderr.write('Only strinfg or dictionaries/object are alloved as lit member for scenarios, check item '+scenario_step+' in -s file'+"\n")
 
     return scenario_l
         
@@ -391,7 +444,7 @@ def main():
     scenario_defs       = None
     scenario_defs_file  = None
     scenario2run        = None
-    timeFactor          = "1"
+    timeFactor          = "1.0"
     clock_init_ue       = None
 
     try:
@@ -436,6 +489,10 @@ def main():
         return 1
 
     re = re_float.match(timeFactor)
+    if not re:
+        usage('Parameter -t must be floating number')
+        return 1 
+
     if not(clock_init_ue is None):
         # conversion from YYYY-MM-DD HH:MM:SS to UE
         try:
@@ -447,10 +504,14 @@ def main():
             return 1
         clock_init_ue = int(date_object.timestamp())
 
-    runtimeClock = theClock(clock_init_ue, timeFactor)
+    runtimeClock = theClock(clock_init_ue, float(timeFactor))
 
     # running scenario - CONTINUE HERE
-    raise ValueError("Here to continue with coding")
+    for a_step in scenario_defs:
+        a_step.run(runtimeClock)
+
+    raiseValueError("NEXT TODO: implement -S server:ip to send events to, implement persistent variables")
+
 
     return 0
             
