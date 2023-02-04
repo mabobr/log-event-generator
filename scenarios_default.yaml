@@ -19,8 +19,6 @@ sshd_2_events:
     - ssh_login2:
       - servers
       - users
-    - wait: -2s
-    - 3:
-      - wait: 1s
+    - wait: -1s
 
 
