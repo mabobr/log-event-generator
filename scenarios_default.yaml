@@ -6,16 +6,16 @@ sshd_2_events:
   - wait: 1s
   - wait: 2000 ms
   # next event in scenario
-  - ssh_login2:
+  - ssh_login2
     # for this event, listed variables will have the same values as in previous event
-    - servers
-    - users
+    #- servers
+    #- users
   
   # numbers are considered as loop-s, it describes how many times, and content must be list
   - 3:
-    - ssh_login1:
-      - servers
-      - users 
+    - ssh_login1
+      #- servers
+      #- users 
     - ssh_login2:
       - servers
       - users

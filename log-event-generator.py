@@ -45,20 +45,28 @@ class TimeStamp:
             raise ValueError("strftime() error on input format string:"+a_ts_string)
         self._ts_string = a_ts_string
 
-    def run(self, clock):
+    def run(self, clock, staticVarList):
         return datetime.datetime.fromtimestamp(clock.get()).strftime(self._ts_string)
 
 
 #############################################################
 class variableList:
-    def __init__(self, varList):
-        self._varList = varList
+    def __init__(self, varList, varListName):
+        self._varList       = varList
+        self._varListName   = varListName
+        self._last_value    = None
 
     def show(self, ts_ue = None):
         return random.choice(self._varList)
 
-    def run(self, clock):
-        return random.choice(self._varList)
+    def run(self, clock, staticVarsList):
+
+        # if self._varListName is present in staticVarsList - then use old value
+        if self._varListName in staticVarsList and not(self._last_value) is None:
+            return self._last_value
+        
+        self._last_value = random.choice(self._varList)
+        return self._last_value
 
 #############################################################
 class aString:
@@ -72,7 +80,7 @@ class aString:
     def string(self):
         return self._a_string
 
-    def run(self, clock):
+    def run(self, clock, staticVarsList):
         return self._a_string
 
 #############################################################
@@ -119,11 +127,11 @@ class anEvent:
                 debug("Event parsing adding string, site 2:"+string_rest)
                 break
 
-    def run(self, clock):
+    def run(self, clock, staticVarsList):
 
         out_text = ''
         for a_token in self._token_list:
-            out_text = out_text + a_token.run(clock)
+            out_text = out_text + a_token.run(clock, staticVarsList)
         
         return out_text
 
@@ -187,8 +195,9 @@ class scenarioStep:
 
     def run(self, clock):
         if self._type == 1:
-            out_text = self._ptr.run(clock)
-            debug('EVENT call out drivere here:'+out_text)
+            out_text = self._ptr.run(clock, self._static_vars)
+            print(out_text, flush=True)
+            #debug('EVENT call out drivere here:'+out_text)
         elif self._type == 2:
             debug('Clock wait in ms:'+str(self._wait_in_ms))
             clock.add(self._wait_in_ms/1000)
@@ -294,17 +303,17 @@ def parse_event_definitions(evts_def_file):
                 return None
          
             if not( isinstance(events_config['variables'][a_var_group],list)):
-                sys.stderr.write('variable group '+a_var_group+' in YAML file:'+evts_def_file+' must be list, not:'+str(type(events_config['timestamps']))+"\n")
+                sys.stderr.write('variable group '+a_var_group+' in YAML file:'+evts_def_file+' must be list, not:'+str(type(events_config['variables']))+"\n")
                 return None
 
-            o_vl = variableList(events_config['variables'][a_var_group])
+            o_vl = variableList(events_config['variables'][a_var_group], a_var_group)
             events_defs[a_var_group] = o_vl
             debug('OK variable list: '+a_var_group+' Example='+o_vl.show())
 
     # check events
     try:
         if not( isinstance(events_config['events'],dict)):
-            sys.stderr.write('events in YAML file:'+evts_def_file+' must be structure/object, not:'+str(type(events_config['timestamps']))+"\n")
+            sys.stderr.write('events in YAML file:'+evts_def_file+' must be structure/object, not:'+str(type(events_config['events']))+"\n")
             return None
     except KeyError:
         sys.stderr.write("At least one event in events section must be present in file:"+evts_def_file)   
@@ -323,6 +332,34 @@ def parse_event_definitions(evts_def_file):
             o_evt = anEvent(events_config['events'][an_event], events_defs)
             events_defs[an_event] = o_evt
             debug('OK event: '+an_event)
+
+    # check functions
+    try:
+        if not( isinstance(events_config['functions'],dict)):
+            sys.stderr.write('functions section, in YAML file:'+evts_def_file+' must be structure/object, not:'+str(type(events_config['functions']))+"\n")
+            return None
+    except KeyError:
+        sys.stderr.write("At least one event in events section must be present in file:"+evts_def_file)   
+        return None
+    else:
+        for a_function in events_config['functions']:
+            debug('Found function fedinition:'+a_function)
+            if not( isinstance(events_config['functions'][a_function], dict)):
+                sys.stderr.write('functions/'+a_function+' section, in YAML file:'+evts_def_file+' must be structure/object, not:'+str(type(events_config['functions'][a_function]))+"\n")
+                return None 
+
+            if a_function == 'random_integer':
+                for a_symbol in events_config['functions'][a_function]:
+                    int_range = events_config['functions'][a_function][a_symbol]
+                    # continue here - syntax check of range, new object - function
+                    # ...
+                    # then copy below to random_network
+                pass
+            elif a_function == 'random_network':
+                pass
+            else:
+                sys.stderr.write('functions section, in YAML file:'+evts_def_file+" in function definition, there is undefined symbol: "+a_function+"\n")
+                return None
 
     debug('Syntax and semantics of file '+evts_def_file+' is OK, continue')
     return events_defs
@@ -389,6 +426,8 @@ def parse_scenarios_rec( a_scenario_cfg, events_defs, scenario_l ):
                         debug('LOOP list, cnt='+str(loop_value))
 
                         list_o = parse_scenarios_rec(loop_l, events_defs, [])
+                        if list_o is None:
+                            return None
                         scenario_l.append( scenarioStep('LOOP:'+str(loop_value), 3, list_o, loop_value) )
                     else:
                         sys.stderr.write("Problem with LOOP, LOOPs must be lists, check in -s YAML file\n")
@@ -424,7 +463,7 @@ def parse_scenarios_rec( a_scenario_cfg, events_defs, scenario_l ):
                                 return None
                         scenario_l.append(obj)
                     else:
-                        sys.stderr.write('For the event '+scenario_dict_entry+' only list is expected, it is list of static variables')
+                        sys.stderr.write('For the event '+scenario_dict_entry+" either add list of static variables or change name of the event from object to string\n")
                         return None
 
                     debug('Scenario: OK added event:'+scenario_dict_entry)
@@ -510,9 +549,7 @@ def main():
     for a_step in scenario_defs:
         a_step.run(runtimeClock)
 
-    raiseValueError("NEXT TODO: implement -S server:ip to send events to, implement persistent variables")
-
-
+    raise ValueError("Continue with implementation of functions.")
     return 0
             
 ############################################################                                                                                                                                                      

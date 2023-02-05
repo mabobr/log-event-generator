@@ -8,13 +8,28 @@ variables:
     - alice
     - bob
     - claire
+    - dylan
   servers:
     - master1
     - master2
     - master3
+    - slave1.my.fqdn.com
+    - slave2.my.fqdn.com
+
+functions:
+  # function port_range returns number 1024-65545
+  random_integer:
+    # defines symbols ssh_src_ports, account_ids will be replated by random valud fomr interval
+    ssh_src_ports:  1024-65535
+    account_ids:    10000-20000
+    pids:           1-2000000
+  random_network:
+    # defines symbols network1, network2, which will be replaced by random ip from given network (ipv4 only)
+    network1: 10.11.12/24
+    network2: 10/8
 
 events:
   ssh_login1: "<86>${syslog_rfc3164} ${servers} sshd[652829]: Accepted publickey for ${users} from 10.11.12.13 port 40080 ssh2: RSA SHA256:QKuZ4KsmwSFZEikZPInvfTgFSfiQVgBJRNKO1gpz5LM"
   ssh_login2: "<86>${syslog_rfc3164} ${servers} sshd[652829]: pam_unix(sshd:session): session opened for user ${users}(uid=80004) by (uid=0)"
   # in valid YAML an dollar sign must be escaped - so this will produce literally ... \${servers} ...
-  escape_example: "<86>${syslog_rfc3164} \\${servers} sshd[652829]: pam_unix(sshd:session): $JANO session opened for user ${users}(uid=80004) by (uid=0)"
+  escape_example: "<86>${syslog_rfc3164} \\${servers} sshd[652829]: pam_unix(sshd:session): $JOHN session opened for user ${users}(uid=80004) by (uid=0)"
